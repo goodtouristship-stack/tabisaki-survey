@@ -46,14 +46,17 @@
   .age-grid .opt-btn { padding: 9px 0; text-align: center; border-radius: var(--radius-sm); }
   .region-sub { font-size: 12px; color: var(--gray-500); margin-bottom: 8px; margin-top: 12px; }
 
-  /* Count stepper */
-  .count-card { background: #fff; border-radius: var(--radius); padding: 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 12px; }
+  /* Drum picker */
+  .count-card { background: #fff; border-radius: var(--radius); padding: 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 16px; }
   .count-card-label { font-size: 12px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; letter-spacing: .06em; flex: 1; }
-  .stepper { display: flex; align-items: center; border: 1.5px solid var(--gray-200); border-radius: 99px; overflow: hidden; background: var(--gray-100); }
-  .stepper button { background: none; border: none; width: 40px; height: 40px; font-size: 22px; color: var(--gray-700); cursor: pointer; font-family: inherit; }
-  .stepper button:disabled { color: var(--gray-200); cursor: not-allowed; }
-  .stepper button:active:not(:disabled) { background: var(--gray-200); }
-  .stepper-val { font-size: 18px; font-weight: 700; min-width: 32px; text-align: center; }
+  .drum-wrap { position: relative; width: 90px; height: 120px; overflow: hidden; cursor: grab; user-select: none; -webkit-user-select: none; }
+  .drum-fade-top { position: absolute; top: 0; left: 0; right: 0; height: 40px; background: linear-gradient(to bottom, rgba(255,255,255,1), rgba(255,255,255,0)); z-index: 2; pointer-events: none; }
+  .drum-fade-bot { position: absolute; bottom: 0; left: 0; right: 0; height: 40px; background: linear-gradient(to top, rgba(255,255,255,1), rgba(255,255,255,0)); z-index: 2; pointer-events: none; }
+  .drum-selector { position: absolute; top: 40px; left: 4px; right: 4px; height: 40px; border-top: 2px solid var(--blue); border-bottom: 2px solid var(--blue); border-radius: 6px; background: var(--blue-light); z-index: 1; pointer-events: none; }
+  .drum-list { position: absolute; left: 0; right: 0; top: 0; z-index: 3; }
+  .drum-item { height: 40px; display: flex; align-items: center; justify-content: center; font-size: 17px; color: var(--gray-500); }
+  .drum-item.active { color: var(--blue); font-weight: 700; font-size: 19px; }
+  .drum-count-label { font-size: 15px; color: var(--gray-700); }
 
   .add-btn { width: 100%; background: var(--blue); color: #fff; border: none; border-radius: var(--radius); padding: 16px; font-size: 16px; font-weight: 600; font-family: inherit; cursor: pointer; margin-top: 4px; transition: background .12s; }
   .add-btn:active { background: var(--blue-dark); }
@@ -163,12 +166,13 @@
   <!-- 人数 -->
   <div class="count-card">
     <div class="count-card-label">人数</div>
-    <div class="stepper">
-      <button id="cnt-minus" onclick="changeCount(-1)" disabled>−</button>
-      <div class="stepper-val" id="cnt-val">1</div>
-      <button id="cnt-plus" onclick="changeCount(1)">+</button>
+    <div class="drum-wrap" id="drum-wrap">
+      <div class="drum-fade-top"></div>
+      <div class="drum-selector"></div>
+      <div class="drum-list" id="drum-list"></div>
+      <div class="drum-fade-bot"></div>
     </div>
-    <div style="font-size:14px;color:var(--gray-700)" id="cnt-label">名</div>
+    <div class="drum-count-label">名</div>
   </div>
 
   <button class="add-btn" id="add-btn" disabled onclick="addEntry()">記録する</button>
@@ -276,14 +280,91 @@ function showTab(id) {
   if(id==='publish') renderPublish();
 }
 
-// Count stepper
-function changeCount(delta) {
-  selCount = Math.max(1, Math.min(20, selCount + delta));
-  document.getElementById('cnt-val').textContent = selCount;
-  document.getElementById('cnt-minus').disabled = selCount <= 1;
-  document.getElementById('cnt-plus').disabled = selCount >= 20;
-  document.getElementById('cnt-label').textContent = selCount > 1 ? '名（×' + selCount + '）' : '名';
-}
+// Drum picker
+(function() {
+  const ITEM_H = 40;
+  const VISIBLE = 3; // items visible (top/center/bottom)
+  const CENTER = 1;  // index of center row in visible area = 1
+  const COUNT = 20;
+  let idx = 0; // currently selected index (0-based => value idx+1)
+  let dragStartY = 0, dragStartIdx = 0, dragging = false;
+
+  function clamp(n) { return Math.max(0, Math.min(COUNT - 1, n)); }
+
+  function setIdx(n, animate) {
+    idx = clamp(n);
+    selCount = idx + 1;
+    const list = document.getElementById('drum-list');
+    if (!list) return;
+    // translateY so that item[idx] sits in the center row
+    // center row top = CENTER * ITEM_H = 40px inside the 120px container
+    // item[idx] top in list = idx * ITEM_H
+    // we want: translateY + idx*ITEM_H = CENTER*ITEM_H  =>  translateY = (CENTER - idx)*ITEM_H
+    const ty = (CENTER - idx) * ITEM_H;
+    list.style.transition = animate ? 'transform .18s cubic-bezier(.25,.46,.45,.94)' : 'none';
+    list.style.transform = 'translateY(' + ty + 'px)';
+    list.querySelectorAll('.drum-item').forEach((el, i) => el.classList.toggle('active', i === idx));
+  }
+
+  window.initDrum = function() {
+    const list = document.getElementById('drum-list');
+    const wrap = document.getElementById('drum-wrap');
+    if (!list || !wrap) return;
+    list.innerHTML = Array.from({length: COUNT}, (_, i) =>
+      '<div class="drum-item">' + (i + 1) + '名</div>'
+    ).join('');
+    setIdx(0, false);
+
+    // touch
+    wrap.addEventListener('touchstart', e => {
+      dragging = true;
+      dragStartY = e.touches[0].clientY;
+      dragStartIdx = idx;
+      list.style.transition = 'none';
+    }, {passive: true});
+    wrap.addEventListener('touchmove', e => {
+      if (!dragging) return;
+      const dy = dragStartY - e.touches[0].clientY; // positive = swipe up = higher number
+      const delta = Math.round(dy / ITEM_H);
+      const tentative = clamp(dragStartIdx + delta);
+      const ty = (CENTER - dragStartIdx) * ITEM_H - (dy - delta * ITEM_H + (tentative - dragStartIdx - delta) * ITEM_H);
+      // simpler: just move list freely while dragging
+      const rawTy = (CENTER - dragStartIdx) * ITEM_H - dy;
+      list.style.transform = 'translateY(' + rawTy + 'px)';
+      list.querySelectorAll('.drum-item').forEach((el, i) => el.classList.toggle('active', i === clamp(dragStartIdx + Math.round(dy / ITEM_H))));
+    }, {passive: true});
+    wrap.addEventListener('touchend', e => {
+      if (!dragging) return;
+      dragging = false;
+      const dy = dragStartY - e.changedTouches[0].clientY;
+      setIdx(dragStartIdx + Math.round(dy / ITEM_H), true);
+    });
+
+    // mouse
+    wrap.addEventListener('mousedown', e => {
+      dragging = true; dragStartY = e.clientY; dragStartIdx = idx;
+      wrap.style.cursor = 'grabbing';
+      list.style.transition = 'none';
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const dy = dragStartY - e.clientY;
+      const rawTy = (CENTER - dragStartIdx) * ITEM_H - dy;
+      list.style.transform = 'translateY(' + rawTy + 'px)';
+      list.querySelectorAll('.drum-item').forEach((el, i) => el.classList.toggle('active', i === clamp(dragStartIdx + Math.round(dy / ITEM_H))));
+    });
+    document.addEventListener('mouseup', e => {
+      if (!dragging) return;
+      dragging = false;
+      wrap.style.cursor = 'grab';
+      const dy = dragStartY - e.clientY;
+      setIdx(dragStartIdx + Math.round(dy / ITEM_H), true);
+    });
+  };
+
+  window.resetDrum = function() { setIdx(0, true); selCount = 1; };
+})();
 
 // Option buttons
 function setupGroup(groupId, key, store, allowCross, altGroups) {
@@ -323,10 +404,7 @@ function resetForm() {
   sel = {gender:null, age:null, region:null};
   selCount = 1;
   document.querySelectorAll('#page-record .opt-btn').forEach(b => b.classList.remove('sel'));
-  document.getElementById('cnt-val').textContent = 1;
-  document.getElementById('cnt-minus').disabled = true;
-  document.getElementById('cnt-plus').disabled = false;
-  document.getElementById('cnt-label').textContent = '名';
+  resetDrum();
   checkReady();
 }
 
@@ -478,6 +556,7 @@ setupGroup('e-age','age',editSel,false,null);
 setupGroup('e-region-dom','region',editSel,true,['e-region-dom','e-region-ovs']);
 setupGroup('e-region-ovs','region',editSel,true,['e-region-dom','e-region-ovs']);
 
+initDrum();
 updateHeader();
 </script>
 </body>
