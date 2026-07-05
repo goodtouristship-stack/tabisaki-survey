@@ -164,15 +164,13 @@
   </div>
 
   <!-- 人数 -->
-  <div class="count-card">
+  <div class="count-card" onclick="openDrumModal()" style="cursor:pointer">
     <div class="count-card-label">人数</div>
-    <div class="drum-wrap" id="drum-wrap">
-      <div class="drum-fade-top"></div>
-      <div class="drum-selector"></div>
-      <div class="drum-list" id="drum-list"></div>
-      <div class="drum-fade-bot"></div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div id="count-display" style="font-size:24px;font-weight:700;color:var(--blue)">1</div>
+      <div style="font-size:15px;color:var(--gray-700)">名</div>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gray-500)" stroke-width="2" style="margin-left:4px"><path d="M6 9l6 6 6-6"/></svg>
     </div>
-    <div class="drum-count-label">名</div>
   </div>
 
   <button class="add-btn" id="add-btn" disabled onclick="addEntry()">記録する</button>
@@ -213,6 +211,26 @@
   <div class="publish-note">PDFは集計サマリー＋参加者一覧を含みます。<br>CSVはExcel等で開ける表形式データです。<br><br>記録データはこのページを閉じても<br>端末に保存されます。</div>
   <div style="margin-top:24px;border-top:1px solid var(--gray-200);padding-top:16px;">
     <button class="clear-btn" style="color:var(--red);border-color:var(--red)" onclick="clearAll()">すべてのデータを削除する</button>
+  </div>
+</div>
+
+<!-- 人数モーダル -->
+<div class="modal-overlay" id="drum-modal" onclick="closeDrumOnBg(event)">
+  <div class="modal-sheet" style="padding-bottom:48px">
+    <div class="modal-title">人数を選ぶ</div>
+    <div style="display:flex;justify-content:center;align-items:center;gap:16px;margin:16px 0">
+      <div class="drum-wrap" id="drum-wrap">
+        <div class="drum-fade-top"></div>
+        <div class="drum-selector"></div>
+        <div class="drum-list" id="drum-list"></div>
+        <div class="drum-fade-bot"></div>
+      </div>
+      <div style="font-size:18px;color:var(--gray-700)">名</div>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeDrumModal()">キャンセル</button>
+      <button class="modal-save" onclick="confirmDrum()">決定</button>
+    </div>
   </div>
 </div>
 
@@ -283,56 +301,56 @@ function showTab(id) {
 // Drum picker
 (function() {
   const ITEM_H = 40;
-  const VISIBLE = 3; // items visible (top/center/bottom)
-  const CENTER = 1;  // index of center row in visible area = 1
+  const CENTER = 1;
   const COUNT = 20;
-  let idx = 0; // currently selected index (0-based => value idx+1)
+  let idx = 0;
   let dragStartY = 0, dragStartIdx = 0, dragging = false;
 
   function clamp(n) { return Math.max(0, Math.min(COUNT - 1, n)); }
 
   function setIdx(n, animate) {
     idx = clamp(n);
-    selCount = idx + 1;
     const list = document.getElementById('drum-list');
     if (!list) return;
-    // translateY so that item[idx] sits in the center row
-    // center row top = CENTER * ITEM_H = 40px inside the 120px container
-    // item[idx] top in list = idx * ITEM_H
-    // we want: translateY + idx*ITEM_H = CENTER*ITEM_H  =>  translateY = (CENTER - idx)*ITEM_H
     const ty = (CENTER - idx) * ITEM_H;
     list.style.transition = animate ? 'transform .18s cubic-bezier(.25,.46,.45,.94)' : 'none';
     list.style.transform = 'translateY(' + ty + 'px)';
     list.querySelectorAll('.drum-item').forEach((el, i) => el.classList.toggle('active', i === idx));
   }
 
-  window.initDrum = function() {
+  function buildList() {
     const list = document.getElementById('drum-list');
-    const wrap = document.getElementById('drum-wrap');
-    if (!list || !wrap) return;
+    if (!list || list.children.length > 0) return;
     list.innerHTML = Array.from({length: COUNT}, (_, i) =>
       '<div class="drum-item">' + (i + 1) + '名</div>'
     ).join('');
-    setIdx(0, false);
+  }
 
-    // touch
+  function attachEvents() {
+    const wrap = document.getElementById('drum-wrap');
+    if (!wrap || wrap._drumReady) return;
+    wrap._drumReady = true;
+
     wrap.addEventListener('touchstart', e => {
       dragging = true;
       dragStartY = e.touches[0].clientY;
       dragStartIdx = idx;
-      list.style.transition = 'none';
+      const list = document.getElementById('drum-list');
+      if (list) list.style.transition = 'none';
+      e.stopPropagation();
     }, {passive: true});
+
     wrap.addEventListener('touchmove', e => {
       if (!dragging) return;
-      const dy = dragStartY - e.touches[0].clientY; // positive = swipe up = higher number
-      const delta = Math.round(dy / ITEM_H);
-      const tentative = clamp(dragStartIdx + delta);
-      const ty = (CENTER - dragStartIdx) * ITEM_H - (dy - delta * ITEM_H + (tentative - dragStartIdx - delta) * ITEM_H);
-      // simpler: just move list freely while dragging
-      const rawTy = (CENTER - dragStartIdx) * ITEM_H - dy;
-      list.style.transform = 'translateY(' + rawTy + 'px)';
-      list.querySelectorAll('.drum-item').forEach((el, i) => el.classList.toggle('active', i === clamp(dragStartIdx + Math.round(dy / ITEM_H))));
-    }, {passive: true});
+      e.preventDefault();
+      e.stopPropagation();
+      const dy = dragStartY - e.touches[0].clientY;
+      const list = document.getElementById('drum-list');
+      if (list) list.style.transform = 'translateY(' + ((CENTER - dragStartIdx) * ITEM_H - dy) + 'px)';
+      const tentative = clamp(dragStartIdx + Math.round(dy / ITEM_H));
+      if (list) list.querySelectorAll('.drum-item').forEach((el, i) => el.classList.toggle('active', i === tentative));
+    }, {passive: false});
+
     wrap.addEventListener('touchend', e => {
       if (!dragging) return;
       dragging = false;
@@ -340,19 +358,20 @@ function showTab(id) {
       setIdx(dragStartIdx + Math.round(dy / ITEM_H), true);
     });
 
-    // mouse
     wrap.addEventListener('mousedown', e => {
       dragging = true; dragStartY = e.clientY; dragStartIdx = idx;
       wrap.style.cursor = 'grabbing';
-      list.style.transition = 'none';
+      const list = document.getElementById('drum-list');
+      if (list) list.style.transition = 'none';
       e.preventDefault();
     });
     document.addEventListener('mousemove', e => {
       if (!dragging) return;
       const dy = dragStartY - e.clientY;
-      const rawTy = (CENTER - dragStartIdx) * ITEM_H - dy;
-      list.style.transform = 'translateY(' + rawTy + 'px)';
-      list.querySelectorAll('.drum-item').forEach((el, i) => el.classList.toggle('active', i === clamp(dragStartIdx + Math.round(dy / ITEM_H))));
+      const list = document.getElementById('drum-list');
+      if (list) list.style.transform = 'translateY(' + ((CENTER - dragStartIdx) * ITEM_H - dy) + 'px)';
+      const tentative = clamp(dragStartIdx + Math.round(dy / ITEM_H));
+      if (list) list.querySelectorAll('.drum-item').forEach((el, i) => el.classList.toggle('active', i === tentative));
     });
     document.addEventListener('mouseup', e => {
       if (!dragging) return;
@@ -361,9 +380,38 @@ function showTab(id) {
       const dy = dragStartY - e.clientY;
       setIdx(dragStartIdx + Math.round(dy / ITEM_H), true);
     });
+  }
+
+  window.initDrum = function() { buildList(); attachEvents(); setIdx(0, false); };
+
+  window.openDrumModal = function() {
+    buildList();
+    attachEvents();
+    setIdx(idx, false);
+    document.getElementById('drum-modal').classList.add('open');
   };
 
-  window.resetDrum = function() { setIdx(0, true); selCount = 1; };
+  window.closeDrumModal = function() {
+    document.getElementById('drum-modal').classList.remove('open');
+  };
+
+  window.closeDrumOnBg = function(e) {
+    if (e.target === document.getElementById('drum-modal')) closeDrumModal();
+  };
+
+  window.confirmDrum = function() {
+    selCount = idx + 1;
+    document.getElementById('count-display').textContent = selCount;
+    closeDrumModal();
+  };
+
+  window.resetDrum = function() {
+    idx = 0;
+    setIdx(0, false);
+    selCount = 1;
+    const disp = document.getElementById('count-display');
+    if (disp) disp.textContent = '1';
+  };
 })();
 
 // Option buttons
