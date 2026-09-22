@@ -132,7 +132,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;ba
   <div class="inner">
     <div class="sc" style="margin-bottom:16px"><div class="sl" style="margin-bottom:4px">保存済み参加者</div><div style="font-size:32px;font-weight:700" id="p-count">0 名</div></div>
     <button class="pub-btn" style="background:var(--green)" id="publish-btn" disabled onclick="publishPDF()">📄 PDFを発行する</button>
-    <button class="pub-btn" style="background:var(--blue)" id="csv-btn" disabled onclick="publishCSV()">📊 CSVをダウンロードする</button>
+    <button class="pub-btn" style="background:var(--blue)" id="csv-btn" disabled onclick="publishXLSX()">📊 Excelをダウンロードする</button>
     <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--g200)">
       <button style="width:100%;background:none;border:1.5px solid var(--red);border-radius:var(--radius);padding:12px;font-size:14px;color:var(--red);font-family:inherit;cursor:pointer" onclick="clearAll()">すべてのデータを削除する</button>
     </div>
@@ -334,42 +334,151 @@ function renderPublish() {
   document.getElementById('csv-btn').disabled = !n;
 }
 
-function publishCSV() {
+function publishXLSX() {
   const e = savedEntries();
-  const BOM = '\uFEFF', h = ['番号','性別','年代','国・地域'];
-  const csv = BOM + [h, ...e.map((x,i) => [i+1, x.gender, x.age, x.region])].map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',')).join('\r\n');
+  if (!e.length) return;
+
+  // Build XML-based Excel (SpreadsheetML) - no library needed
+  const rows = [
+    ['No.', 'Gender / 性別', 'Age / 年代', 'Region / 国・地域'],
+    ...e.map((x, i) => [i+1, x.gender, x.age, x.region])
+  ];
+
+  // Summary sheet rows
+  const total = e.length;
+  const male = e.filter(x=>x.gender==='男').length;
+  const female = e.filter(x=>x.gender==='女').length;
+  const dom = e.filter(x=>x.region==='日本国内').length;
+  const ovs = total - dom;
+  const summaryRows = [
+    ['Category', 'Label', 'Count', 'Percent'],
+    ['Total', 'All participants', total, '100%'],
+    ['Gender', 'Male / 男', male, total?Math.round(male/total*100)+'%':''],
+    ['Gender', 'Female / 女', female, total?Math.round(female/total*100)+'%':''],
+    ['Region', 'Domestic / 日本国内', dom, total?Math.round(dom/total*100)+'%':''],
+    ['Region', 'Overseas / 海外', ovs, total?Math.round(ovs/total*100)+'%':''],
+    [],
+    ['Age breakdown','','',''],
+  ];
+  const AGES = ['10代','20代','30代','40代','50代','60代','70代以上'];
+  AGES.forEach(a => {
+    const n = e.filter(x=>x.age===a).length;
+    summaryRows.push(['Age', a, n, total?Math.round(n/total*100)+'%':'']);
+  });
+  ['アジア・オセアニア','欧州','北米','中南米','中東・アフリカ'].forEach(r => {
+    const n = e.filter(x=>x.region===r).length;
+    if (n) summaryRows.push(['Region detail', r, n, total?Math.round(n/total*100)+'%':'']);
+  });
+
+  function xmlCell(val, isNum) {
+    if (val === null || val === undefined || val === '') return '<Cell><Data ss:Type="String"></Data></Cell>';
+    if (isNum || typeof val === 'number') return `<Cell><Data ss:Type="Number">${val}</Data></Cell>`;
+    return `<Cell><Data ss:Type="String">${String(val).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</Data></Cell>`;
+  }
+
+  function makeSheet(name, sheetRows) {
+    const rowsXml = sheetRows.map(r => {
+      if (!r || !r.length) return '<Row></Row>';
+      return '<Row>' + r.map((v,ci) => xmlCell(v, ci===0 && name==='Data' && typeof v==='number')).join('') + '</Row>';
+    }).join('\n');
+    return `<Worksheet ss:Name="${name}"><Table>${rowsXml}</Table></Worksheet>`;
+  }
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+  <Styles>
+    <Style ss:ID="header"><Font ss:Bold="1"/><Interior ss:Color="#1a73e8" ss:Pattern="Solid"/><Font ss:Color="#FFFFFF" ss:Bold="1"/></Style>
+  </Styles>
+  ${makeSheet('Data', rows)}
+  ${makeSheet('Summary', summaryRows)}
+</Workbook>`;
+
+  const blob = new Blob([xml], {type: 'application/vnd.ms-excel;charset=utf-8'});
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8;'}));
-  a.download = 'tabisaki-' + new Date().toISOString().slice(0,10) + '.csv';
+  a.href = URL.createObjectURL(blob);
+  a.download = 'tabisaki-' + new Date().toISOString().slice(0,10) + '.xls';
   a.click();
-  showToast('CSVをダウンロードしました');
+  showToast('Excelをダウンロードしました');
 }
 
 function publishPDF() {
   if (typeof window.jspdf === 'undefined') { showToast('PDF読込中…再度タップ'); return; }
   const {jsPDF} = window.jspdf;
-  const doc = new jsPDF({orientation:'p', unit:'mm', format:'a4'});
   const e = savedEntries(), now = new Date(), total = e.length;
-  doc.setFont('helvetica','bold'); doc.setFontSize(20); doc.text('Tabisaki Quiz Kai', 20, 24);
-  doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.setTextColor(100);
-  doc.text('Participant Report  /  ' + now.toLocaleDateString('ja-JP', {year:'numeric',month:'long',day:'numeric'}), 20, 32);
-  doc.setTextColor(0); doc.setFontSize(13); doc.setFont('helvetica','bold'); doc.text('Summary', 20, 46);
-  doc.setFont('helvetica','normal'); doc.setFontSize(11);
-  const male = e.filter(x=>x.gender==='男').length, female = total-male, dom = e.filter(x=>x.region==='日本国内').length, ovs = total-dom;
-  const rows = [['Total',String(total)],['Male',String(male)+(total?'  ('+Math.round(male/total*100)+'%)':'')],['Female',String(female)+(total?'  ('+Math.round(female/total*100)+'%)':'')],['Domestic',String(dom)],['Overseas',String(ovs)]];
-  REGIONS.filter(r=>r!=='日本国内').forEach(r=>{const n=e.filter(x=>x.region===r).length;if(n)rows.push(['  '+r,String(n)]);});
-  rows.push(['---','---']);
-  AGES.forEach(a=>{const n=e.filter(x=>x.age===a).length;if(n)rows.push([a,String(n)]);});
-  let y=54;
-  rows.forEach(([l,v])=>{if(l==='---'){doc.setLineWidth(0.3);doc.line(20,y,190,y);y+=5;return;}doc.text(l,25,y);doc.text(v,130,y);y+=7;});
-  y+=6; doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.text('Participant Log',20,y); y+=7;
-  doc.setFontSize(10); doc.setFont('helvetica','bold');
-  doc.text('#',20,y); doc.text('Gender',35,y); doc.text('Age',60,y); doc.text('Region',90,y); y+=4;
-  doc.setLineWidth(0.3); doc.line(20,y,190,y); y+=6; doc.setFont('helvetica','normal');
-  e.forEach((x,i)=>{if(y>275){doc.addPage();y=20;}doc.text(String(i+1),20,y);doc.text(x.gender,35,y);doc.text(x.age,60,y);doc.text(x.region,90,y);y+=6;});
-  doc.save('tabisaki-'+now.toISOString().slice(0,10)+'.pdf');
+  const doc = new jsPDF({orientation:'p', unit:'mm', format:'a4'});
+
+  // Title
+  doc.setFont('helvetica','bold'); doc.setFontSize(18);
+  doc.text('Tabisaki Quiz Kai - Participant Report', 14, 18);
+  doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(120);
+  doc.text('Date: ' + now.toISOString().slice(0,10) + '   Total saved: ' + total, 14, 25);
+  doc.setTextColor(0);
+
+  // Summary box
+  const male = e.filter(x=>x.gender==='男').length;
+  const female = total - male;
+  const dom = e.filter(x=>x.region==='日本国内').length;
+  const ovs = total - dom;
+
+  doc.setFont('helvetica','bold'); doc.setFontSize(11);
+  doc.text('Summary', 14, 34);
+  doc.setFont('helvetica','normal'); doc.setFontSize(10);
+
+  const sumData = [
+    ['Total', String(total)],
+    ['Male (男)', male + (total?' ('+Math.round(male/total*100)+'%)':'')],
+    ['Female (女)', female + (total?' ('+Math.round(female/total*100)+'%)':'')],
+    ['Domestic (国内)', String(dom)],
+    ['Overseas (海外)', String(ovs)],
+  ];
+  const AGES2 = ['10代','20代','30代','40代','50代','60代','70代以上'];
+  AGES2.forEach(a => {
+    const n = e.filter(x=>x.age===a).length;
+    if(n) sumData.push([a, n + (total?' ('+Math.round(n/total*100)+'%)':'')]);
+  });
+
+  let y = 40;
+  sumData.forEach(([l,v]) => {
+    doc.setFont('helvetica','bold'); doc.text(l+':', 16, y);
+    doc.setFont('helvetica','normal'); doc.text(v, 70, y);
+    y += 6;
+  });
+
+  // Participant table
+  y += 4;
+  doc.setFont('helvetica','bold'); doc.setFontSize(11);
+  doc.text('Participant List', 14, y); y += 5;
+
+  // Table header
+  const cols = [14, 24, 40, 62, 110];
+  const headers = ['#', 'Gender', 'Age', 'Region'];
+  doc.setFillColor(26, 115, 232);
+  doc.rect(14, y-4, 182, 7, 'F');
+  doc.setTextColor(255);
+  doc.setFontSize(9); doc.setFont('helvetica','bold');
+  headers.forEach((h,i) => doc.text(h, cols[i], y));
+  doc.setTextColor(0); doc.setFont('helvetica','normal');
+  y += 4;
+
+  // Table rows
+  e.forEach((x, i) => {
+    if (y > 280) { doc.addPage(); y = 14; }
+    const bg = i % 2 === 0;
+    if (bg) { doc.setFillColor(240, 244, 255); doc.rect(14, y-3.5, 182, 6.5, 'F'); }
+    doc.setFontSize(9);
+    doc.text(String(i+1), cols[0], y);
+    doc.text(x.gender || '', cols[1], y);
+    doc.text(x.age || '', cols[2], y);
+    doc.text(x.region || '', cols[3], y);
+    y += 6.5;
+  });
+
+  doc.save('tabisaki-' + now.toISOString().slice(0,10) + '.pdf');
   showToast('PDFを発行しました');
 }
+
 
 function showToast(msg) {
   const t = document.getElementById('toast');
