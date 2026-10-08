@@ -9,7 +9,6 @@
 <meta name="theme-color" content="#ffffff">
 <title>旅先クイズ会 — 参加者記録</title>
 <link rel="manifest" href="manifest.json">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root{
   --blue:#1a73e8;--blue-light:#e8f0fe;--blue-dark:#1557b0;
@@ -79,9 +78,29 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;ba
 .brf{height:100%;background:var(--blue);border-radius:99px}
 .pub-btn{width:100%;color:#fff;border:none;border-radius:var(--radius);padding:16px;font-size:16px;font-weight:600;font-family:inherit;cursor:pointer;margin-bottom:12px}
 .pub-btn:disabled{background:var(--g200);color:var(--g500);cursor:not-allowed}
+.pub-note{font-size:12px;color:var(--g700);line-height:1.6;background:#fff;border-radius:var(--radius);padding:12px 14px;margin-bottom:12px}
 
 .toast{position:fixed;bottom:32px;left:50%;transform:translateX(-50%) translateY(8px);background:rgba(32,33,36,.9);color:#fff;padding:10px 20px;border-radius:99px;font-size:14px;opacity:0;transition:all .25s;pointer-events:none;white-space:nowrap;z-index:200}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* 印刷用（PDF書き出し）— 通常は非表示 */
+#print-root{display:none}
+@media print{
+  html,body{height:auto!important;overflow:visible!important;display:block!important;background:#fff!important}
+  body>*:not(#print-root){display:none!important}
+  #print-root{display:block!important;color:#000;font-size:11px}
+  #print-root h1{font-size:18px;margin-bottom:4px}
+  #print-root .pr-meta{color:#555;margin-bottom:12px}
+  #print-root h2{font-size:13px;margin:14px 0 6px}
+  #print-root table{border-collapse:collapse;width:100%}
+  #print-root th,#print-root td{border:1px solid #bbb;padding:3px 8px;text-align:left}
+  #print-root th{background:#1a73e8;color:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  #print-root tbody tr:nth-child(even) td{background:#f0f4ff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  #print-root thead{display:table-header-group}
+  #print-root tr{page-break-inside:avoid}
+  #print-root table.sum{width:auto;min-width:50%}
+  @page{size:A4;margin:12mm}
+}
 </style>
 </head>
 <body>
@@ -133,11 +152,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;ba
     <div class="sc" style="margin-bottom:16px"><div class="sl" style="margin-bottom:4px">保存済み参加者</div><div style="font-size:32px;font-weight:700" id="p-count">0 名</div></div>
     <button class="pub-btn" style="background:var(--green)" id="publish-btn" disabled onclick="publishPDF()">📄 PDFを発行する</button>
     <button class="pub-btn" style="background:var(--blue)" id="csv-btn" disabled onclick="publishXLSX()">📊 Excelをダウンロードする</button>
+    <div class="pub-note">
+      <b>PDF：</b>印刷画面が開いたら、プレビューを2本指で広げて拡大 → 共有ボタン →「ファイルに保存」でPDFになります。<br>
+      <b>Excel：</b>共有画面が出たら「ファイルに保存」またはGoogleドライブを選んでください。Googleスプレッドシートで開けます。<br>
+      どちらも通信は不要です。
+    </div>
     <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--g200)">
       <button style="width:100%;background:none;border:1.5px solid var(--red);border-radius:var(--radius);padding:12px;font-size:14px;color:var(--red);font-family:inherit;cursor:pointer" onclick="clearAll()">すべてのデータを削除する</button>
     </div>
   </div>
 </div>
+
+<!-- 印刷用ビュー -->
+<div id="print-root"></div>
 
 <div class="toast" id="toast"></div>
 
@@ -186,7 +213,6 @@ function updateCard(id) {
   el.querySelector('.card-num').className = 'card-num' + (complete ? ' done' : '');
   el.querySelector('.card-num').textContent = id + '番' + (p.saved ? ' ✓' : '');
 
-  // update gender buttons
   el.querySelectorAll('[data-field="gender"] .opt').forEach(b => {
     b.classList.toggle('sel', b.dataset.val === p.gender);
   });
@@ -211,7 +237,6 @@ function saveAll() {
   done.forEach(p => p.saved = true);
   save();
   updateToolbar();
-  // re-render saved state on all cards
   persons.forEach(p => {
     const el = document.getElementById('card-' + p.id);
     if (!el) return;
@@ -251,7 +276,6 @@ function renderAllCards() {
   persons.forEach((p, i) => {
     const num = i + 1;
 
-    // Anchor marker every 50
     if (num === 1 || num % 50 === 0) {
       const anchor = document.createElement('div');
       anchor.className = 'anchor-marker';
@@ -334,151 +358,192 @@ function renderPublish() {
   document.getElementById('csv-btn').disabled = !n;
 }
 
-function publishXLSX() {
-  const e = savedEntries();
-  if (!e.length) return;
-
-  // Build XML-based Excel (SpreadsheetML) - no library needed
-  const rows = [
-    ['No.', 'Gender / 性別', 'Age / 年代', 'Region / 国・地域'],
-    ...e.map((x, i) => [i+1, x.gender, x.age, x.region])
-  ];
-
-  // Summary sheet rows
+/* ===== 集計用の共通関数 ===== */
+function buildSummaryRows(e) {
   const total = e.length;
-  const male = e.filter(x=>x.gender==='男').length;
-  const female = e.filter(x=>x.gender==='女').length;
-  const dom = e.filter(x=>x.region==='日本国内').length;
-  const ovs = total - dom;
-  const summaryRows = [
-    ['Category', 'Label', 'Count', 'Percent'],
-    ['Total', 'All participants', total, '100%'],
-    ['Gender', 'Male / 男', male, total?Math.round(male/total*100)+'%':''],
-    ['Gender', 'Female / 女', female, total?Math.round(female/total*100)+'%':''],
-    ['Region', 'Domestic / 日本国内', dom, total?Math.round(dom/total*100)+'%':''],
-    ['Region', 'Overseas / 海外', ovs, total?Math.round(ovs/total*100)+'%':''],
-    [],
-    ['Age breakdown','','',''],
+  const pct = n => total ? Math.round(n / total * 100) + '%' : '';
+  const male = e.filter(x => x.gender === '男').length;
+  const female = e.filter(x => x.gender === '女').length;
+  const dom = e.filter(x => x.region === '日本国内').length;
+  const rows = [
+    ['項目', '内訳', '人数', '割合'],
+    ['合計', '全参加者', total, '100%'],
+    ['性別', '男性', male, pct(male)],
+    ['性別', '女性', female, pct(female)],
+    ['国内・海外', '日本国内', dom, pct(dom)],
+    ['国内・海外', '海外', total - dom, pct(total - dom)]
   ];
-  const AGES = ['10代','20代','30代','40代','50代','60代','70代以上'];
-  AGES.forEach(a => {
-    const n = e.filter(x=>x.age===a).length;
-    summaryRows.push(['Age', a, n, total?Math.round(n/total*100)+'%':'']);
-  });
-  ['アジア・オセアニア','欧州','北米','中南米','中東・アフリカ'].forEach(r => {
-    const n = e.filter(x=>x.region===r).length;
-    if (n) summaryRows.push(['Region detail', r, n, total?Math.round(n/total*100)+'%':'']);
-  });
+  AGES.forEach(a => { const n = e.filter(x => x.age === a).length; rows.push(['年代', a, n, pct(n)]); });
+  REGIONS.forEach(r => { const n = e.filter(x => x.region === r).length; rows.push(['地域', r, n, pct(n)]); });
+  return rows;
+}
 
-  function xmlCell(val, isNum) {
-    if (val === null || val === undefined || val === '') return '<Cell><Data ss:Type="String"></Data></Cell>';
-    if (isNum || typeof val === 'number') return `<Cell><Data ss:Type="Number">${val}</Data></Cell>`;
-    return `<Cell><Data ss:Type="String">${String(val).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</Data></Cell>`;
+/* ===== ファイルの受け渡し（共有シート → なければダウンロード） ===== */
+async function deliverFile(blob, filename, mime) {
+  const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+  if (isMobile && window.File && navigator.canShare) {
+    try {
+      const file = new File([blob], filename, {type: mime});
+      if (navigator.canShare({files: [file]})) {
+        await navigator.share({files: [file]});
+        return 'shared';
+      }
+    } catch (err) {
+      if (err && err.name === 'AbortError') return 'cancel';
+    }
   }
-
-  function makeSheet(name, sheetRows) {
-    const rowsXml = sheetRows.map(r => {
-      if (!r || !r.length) return '<Row></Row>';
-      return '<Row>' + r.map((v,ci) => xmlCell(v, ci===0 && name==='Data' && typeof v==='number')).join('') + '</Row>';
-    }).join('\n');
-    return `<Worksheet ss:Name="${name}"><Table>${rowsXml}</Table></Worksheet>`;
-  }
-
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
-  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
-  <Styles>
-    <Style ss:ID="header"><Font ss:Bold="1"/><Interior ss:Color="#1a73e8" ss:Pattern="Solid"/><Font ss:Color="#FFFFFF" ss:Bold="1"/></Style>
-  </Styles>
-  ${makeSheet('Data', rows)}
-  ${makeSheet('Summary', summaryRows)}
-</Workbook>`;
-
-  const blob = new Blob([xml], {type: 'application/vnd.ms-excel;charset=utf-8'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'tabisaki-' + new Date().toISOString().slice(0,10) + '.xls';
+  a.download = filename;
+  document.body.appendChild(a);
   a.click();
-  showToast('Excelをダウンロードしました');
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  return 'download';
 }
 
+// ==XLSX-BEGIN==
+/* ===== xlsx生成（外部ライブラリなし・通信不要） ===== */
+function crc32(bytes) {
+  let table = crc32.t;
+  if (!table) {
+    table = crc32.t = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      table[i] = c >>> 0;
+    }
+  }
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) crc = table[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function makeZip(files) { // files: [{name, data(string)}] 無圧縮(store)
+  const enc = new TextEncoder();
+  const parts = [], central = [];
+  let offset = 0;
+  const d = new Date();
+  const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  const dosDate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  files.forEach(f => {
+    const name = enc.encode(f.name), data = enc.encode(f.data);
+    const crc = crc32(data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
+    lh.setUint16(8, 0, true); lh.setUint16(10, dosTime, true); lh.setUint16(12, dosDate, true);
+    lh.setUint32(14, crc, true); lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true);
+    lh.setUint16(26, name.length, true); lh.setUint16(28, 0, true);
+    parts.push(new Uint8Array(lh.buffer), name, data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true);
+    ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true); ch.setUint16(12, dosTime, true);
+    ch.setUint16(14, dosDate, true); ch.setUint32(16, crc, true); ch.setUint32(20, data.length, true);
+    ch.setUint32(24, data.length, true); ch.setUint16(28, name.length, true);
+    ch.setUint16(30, 0, true); ch.setUint16(32, 0, true); ch.setUint16(34, 0, true);
+    ch.setUint16(36, 0, true); ch.setUint32(38, 0, true); ch.setUint32(42, offset, true);
+    central.push(new Uint8Array(ch.buffer), name);
+    offset += 30 + name.length + data.length;
+  });
+  let cdSize = 0;
+  central.forEach(c => cdSize += c.length);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(4, 0, true); end.setUint16(6, 0, true);
+  end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+  end.setUint32(12, cdSize, true); end.setUint32(16, offset, true); end.setUint16(20, 0, true);
+  return new Blob([...parts, ...central, new Uint8Array(end.buffer)],
+    {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+
+function xmlEsc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function sheetXml(rows) {
+  const col = i => String.fromCharCode(65 + i);
+  const body = rows.map((r, ri) => {
+    const cells = r.map((v, ci) => {
+      const ref = col(ci) + (ri + 1);
+      const style = ri === 0 ? ' s="1"' : '';
+      if (typeof v === 'number') return `<c r="${ref}"${style}><v>${v}</v></c>`;
+      return `<c r="${ref}"${style} t="inlineStr"><is><t>${xmlEsc(v)}</t></is></c>`;
+    }).join('');
+    return `<row r="${ri + 1}">${cells}</row>`;
+  }).join('');
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<cols><col min="1" max="4" width="20" customWidth="1"/></cols>' +
+    `<sheetData>${body}</sheetData></worksheet>`;
+}
+
+function buildXlsx(dataRows, summaryRows) {
+  const X = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  return makeZip([
+    {name: '[Content_Types].xml', data: X +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+      '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+      '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+      '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+      '</Types>'},
+    {name: '_rels/.rels', data: X +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+      '</Relationships>'},
+    {name: 'xl/workbook.xml', data: X +
+      '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+      '<sheets><sheet name="データ" sheetId="1" r:id="rId1"/><sheet name="集計" sheetId="2" r:id="rId2"/></sheets></workbook>'},
+    {name: 'xl/_rels/workbook.xml.rels', data: X +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>' +
+      '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+      '</Relationships>'},
+    {name: 'xl/styles.xml', data: X +
+      '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+      '<fonts count="2"><font><sz val="11"/><name val="Arial"/></font><font><b/><sz val="11"/><name val="Arial"/></font></fonts>' +
+      '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
+      '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+      '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+      '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+      '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>' +
+      '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+      '</styleSheet>'},
+    {name: 'xl/worksheets/sheet1.xml', data: sheetXml(dataRows)},
+    {name: 'xl/worksheets/sheet2.xml', data: sheetXml(summaryRows)}
+  ]);
+}
+// ==XLSX-END==
+
+async function publishXLSX() {
+  const e = savedEntries();
+  if (!e.length) return;
+  const dataRows = [['No.', '性別', '年代', '国・地域']]
+    .concat(e.map((x, i) => [i + 1, x.gender === '男' ? '男性' : '女性', x.age, x.region]));
+  const blob = buildXlsx(dataRows, buildSummaryRows(e));
+  const name = 'tabisaki-' + new Date().toISOString().slice(0, 10) + '.xlsx';
+  const r = await deliverFile(blob, name, blob.type);
+  if (r !== 'cancel') showToast('Excelを書き出しました');
+}
+
+/* ===== PDF：印刷画面から「PDFとして保存」（外部ライブラリ不要・通信不要） ===== */
 function publishPDF() {
-  if (typeof window.jspdf === 'undefined') { showToast('PDF読込中…再度タップ'); return; }
-  const {jsPDF} = window.jspdf;
-  const e = savedEntries(), now = new Date(), total = e.length;
-  const doc = new jsPDF({orientation:'p', unit:'mm', format:'a4'});
-
-  // Title
-  doc.setFont('helvetica','bold'); doc.setFontSize(18);
-  doc.text('Tabisaki Quiz Kai - Participant Report', 14, 18);
-  doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(120);
-  doc.text('Date: ' + now.toISOString().slice(0,10) + '   Total saved: ' + total, 14, 25);
-  doc.setTextColor(0);
-
-  // Summary box
-  const male = e.filter(x=>x.gender==='男').length;
-  const female = total - male;
-  const dom = e.filter(x=>x.region==='日本国内').length;
-  const ovs = total - dom;
-
-  doc.setFont('helvetica','bold'); doc.setFontSize(11);
-  doc.text('Summary', 14, 34);
-  doc.setFont('helvetica','normal'); doc.setFontSize(10);
-
-  const sumData = [
-    ['Total', String(total)],
-    ['Male (男)', male + (total?' ('+Math.round(male/total*100)+'%)':'')],
-    ['Female (女)', female + (total?' ('+Math.round(female/total*100)+'%)':'')],
-    ['Domestic (国内)', String(dom)],
-    ['Overseas (海外)', String(ovs)],
-  ];
-  const AGES2 = ['10代','20代','30代','40代','50代','60代','70代以上'];
-  AGES2.forEach(a => {
-    const n = e.filter(x=>x.age===a).length;
-    if(n) sumData.push([a, n + (total?' ('+Math.round(n/total*100)+'%)':'')]);
-  });
-
-  let y = 40;
-  sumData.forEach(([l,v]) => {
-    doc.setFont('helvetica','bold'); doc.text(l+':', 16, y);
-    doc.setFont('helvetica','normal'); doc.text(v, 70, y);
-    y += 6;
-  });
-
-  // Participant table
-  y += 4;
-  doc.setFont('helvetica','bold'); doc.setFontSize(11);
-  doc.text('Participant List', 14, y); y += 5;
-
-  // Table header
-  const cols = [14, 24, 40, 62, 110];
-  const headers = ['#', 'Gender', 'Age', 'Region'];
-  doc.setFillColor(26, 115, 232);
-  doc.rect(14, y-4, 182, 7, 'F');
-  doc.setTextColor(255);
-  doc.setFontSize(9); doc.setFont('helvetica','bold');
-  headers.forEach((h,i) => doc.text(h, cols[i], y));
-  doc.setTextColor(0); doc.setFont('helvetica','normal');
-  y += 4;
-
-  // Table rows
-  e.forEach((x, i) => {
-    if (y > 280) { doc.addPage(); y = 14; }
-    const bg = i % 2 === 0;
-    if (bg) { doc.setFillColor(240, 244, 255); doc.rect(14, y-3.5, 182, 6.5, 'F'); }
-    doc.setFontSize(9);
-    doc.text(String(i+1), cols[0], y);
-    doc.text(x.gender || '', cols[1], y);
-    doc.text(x.age || '', cols[2], y);
-    doc.text(x.region || '', cols[3], y);
-    y += 6.5;
-  });
-
-  doc.save('tabisaki-' + now.toISOString().slice(0,10) + '.pdf');
-  showToast('PDFを発行しました');
+  const e = savedEntries();
+  if (!e.length) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const sum = buildSummaryRows(e);
+  const sumHtml = '<table class="sum"><thead><tr>' + sum[0].map(h => `<th>${xmlEsc(h)}</th>`).join('') + '</tr></thead><tbody>' +
+    sum.slice(1).map(r => '<tr>' + r.map(v => `<td>${xmlEsc(v)}</td>`).join('') + '</tr>').join('') + '</tbody></table>';
+  const listHtml = '<table><thead><tr><th>No.</th><th>性別</th><th>年代</th><th>国・地域</th></tr></thead><tbody>' +
+    e.map((x, i) => `<tr><td>${i + 1}</td><td>${x.gender === '男' ? '男性' : '女性'}</td><td>${xmlEsc(x.age)}</td><td>${xmlEsc(x.region)}</td></tr>`).join('') +
+    '</tbody></table>';
+  document.getElementById('print-root').innerHTML =
+    `<h1>旅先クイズ会 参加者記録</h1><div class="pr-meta">出力日：${today}　保存済み：${e.length}名</div>` +
+    `<h2>集計</h2>${sumHtml}<h2>参加者一覧</h2>${listHtml}`;
+  setTimeout(() => window.print(), 100);
 }
-
 
 function showToast(msg) {
   const t = document.getElementById('toast');
@@ -490,6 +555,11 @@ function showToast(msg) {
 renderAllCards();
 buildToc();
 updateToolbar();
+
+// オフライン起動用（初回だけ通信が必要）
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+}
 </script>
 </body>
 </html>
