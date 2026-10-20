@@ -143,6 +143,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;ba
     </div>
     <div class="bc"><div class="bt">年代別</div><div id="age-bars"></div></div>
     <div class="bc"><div class="bt">地域別</div><div id="region-bars"></div></div>
+    <div class="bc"><div class="bt">A/B/C別</div><div id="abc-bars"></div></div>
   </div>
 </div>
 
@@ -171,6 +172,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;ba
 <script>
 const TOTAL = 600;
 const AGES = ['10代','20代','30代','40代','50代','60代','70代以上'];
+const ABCS = ['A','B','C'];
 const REGIONS = ['日本国内','アジア・オセアニア','欧州','北米','中南米','中東・アフリカ'];
 const REG_SHORT = {'日本国内':'国内','アジア・オセアニア':'アジア','欧州':'欧州','北米':'北米','中南米':'中南米','中東・アフリカ':'中東AF'};
 
@@ -179,7 +181,7 @@ let persons = JSON.parse(localStorage.getItem('tqk5_persons') || 'null');
 if (!persons || persons.length !== TOTAL) {
   const old = persons || [];
   persons = Array.from({length: TOTAL}, (_, i) => {
-    return old[i] || {id: i+1, gender: null, age: null, region: null, saved: false};
+    return old[i] || {id: i+1, gender: null, age: null, region: null, abc: null, saved: false};
   });
   save();
 }
@@ -207,7 +209,7 @@ function updateCard(id) {
   const p = persons[id - 1];
   const el = document.getElementById('card-' + id);
   if (!el) return;
-  const complete = p.gender && p.age && p.region;
+  const complete = p.gender && p.age && p.region && p.abc;
   el.className = 'person-card' + (complete ? ' done' : '') + (p.saved ? ' saved' : '');
 
   el.querySelector('.card-num').className = 'card-num' + (complete ? ' done' : '');
@@ -222,17 +224,20 @@ function updateCard(id) {
   el.querySelectorAll('[data-field="region"] .opt').forEach(b => {
     b.classList.toggle('sel', b.dataset.val === p.region);
   });
+  el.querySelectorAll('[data-field="abc"] .opt').forEach(b => {
+    b.classList.toggle('sel', b.dataset.val === p.abc);
+  });
 }
 
 function updateToolbar() {
-  const done = persons.filter(p => p.gender && p.age && p.region).length;
+  const done = persons.filter(p => p.gender && p.age && p.region && p.abc).length;
   const saved = persons.filter(p => p.saved).length;
   document.getElementById('toolbar-info').textContent = `完了${done}名 / 保存済${saved}名`;
   document.getElementById('hdr-count').textContent = saved;
 }
 
 function saveAll() {
-  const done = persons.filter(p => p.gender && p.age && p.region);
+  const done = persons.filter(p => p.gender && p.age && p.region && p.abc);
   if (!done.length) { showToast('記入完了の人がいません'); return; }
   done.forEach(p => p.saved = true);
   save();
@@ -240,7 +245,7 @@ function saveAll() {
   persons.forEach(p => {
     const el = document.getElementById('card-' + p.id);
     if (!el) return;
-    const complete = p.gender && p.age && p.region;
+    const complete = p.gender && p.age && p.region && p.abc;
     el.className = 'person-card' + (complete ? ' done' : '') + (p.saved ? ' saved' : '');
     el.querySelector('.card-num').textContent = p.id + '番' + (p.saved ? ' ✓' : '');
   });
@@ -249,7 +254,7 @@ function saveAll() {
 
 function clearUnsaved() {
   if (!confirm('未保存の入力をクリアしますか？')) return;
-  persons.forEach(p => { if (!p.saved) { p.gender = null; p.age = null; p.region = null; } });
+  persons.forEach(p => { if (!p.saved) { p.gender = null; p.age = null; p.region = null; p.abc = null; } });
   save();
   persons.forEach(p => { if (!p.saved) updateCard(p.id); });
   updateToolbar();
@@ -258,7 +263,7 @@ function clearUnsaved() {
 
 function clearAll() {
   if (!confirm('すべての記録を削除しますか？この操作は元に戻せません。')) return;
-  persons.forEach(p => { p.gender = null; p.age = null; p.region = null; p.saved = false; });
+  persons.forEach(p => { p.gender = null; p.age = null; p.region = null; p.abc = null; p.saved = false; });
   save();
   persons.forEach(p => updateCard(p.id));
   updateToolbar();
@@ -285,7 +290,7 @@ function renderAllCards() {
 
     const card = document.createElement('div');
     card.id = 'card-' + num;
-    const complete = p.gender && p.age && p.region;
+    const complete = p.gender && p.age && p.region && p.abc;
     card.className = 'person-card' + (complete ? ' done' : '') + (p.saved ? ' saved' : '');
 
     card.innerHTML = `
@@ -308,6 +313,12 @@ function renderAllCards() {
         <div class="row-label">地域</div>
         <div class="btn-group" data-field="region">
           ${REGIONS.map(v=>`<button class="opt sm${p.region===v?' sel':''}" data-val="${v}" onclick="pick(${num},'region','${v}')">${REG_SHORT[v]}</button>`).join('')}
+        </div>
+      </div>
+      <div class="card-row">
+        <div class="row-label">ABC</div>
+        <div class="btn-group" data-field="abc">
+          ${ABCS.map(v=>`<button class="opt${p.abc===v?' sel':''}" data-val="${v}" onclick="pick(${num},'abc','${v}')">${v}</button>`).join('')}
         </div>
       </div>`;
     frag.appendChild(card);
@@ -348,6 +359,10 @@ function renderStats() {
     ? AGES.map(a => { const n = e.filter(x => x.age === a).length, p = Math.round(n/total*100); return n ? `<div class="br"><div class="brl"><span>${a}</span><span>${n}名(${p}%)</span></div><div class="brt"><div class="brf" style="width:${p}%"></div></div></div>` : ''; }).join('')
     : '<div style="color:var(--g500);font-size:13px">データなし</div>';
   const rb = REGIONS.map(r => { const n = e.filter(x => x.region === r).length, p = total ? Math.round(n/total*100) : 0; return n ? `<div class="br"><div class="brl"><span>${r}</span><span>${n}名(${p}%)</span></div><div class="brt"><div class="brf" style="width:${p}%"></div></div></div>` : ''; }).join('');
+  const abcItems = ABCS.concat(['未選択']).map(k => ({k, n: e.filter(x => (k === '未選択' ? !x.abc : x.abc === k)).length}));
+  document.getElementById('abc-bars').innerHTML = total
+    ? abcItems.filter(it => it.n || it.k !== '未選択').map(it => { const p = Math.round(it.n/total*100); return `<div class="br"><div class="brl"><span>${it.k}</span><span>${it.n}名(${p}%)</span></div><div class="brt"><div class="brf" style="width:${p}%"></div></div></div>`; }).join('')
+    : '<div style="color:var(--g500);font-size:13px">データなし</div>';
   document.getElementById('region-bars').innerHTML = rb || '<div style="color:var(--g500);font-size:13px">データなし</div>';
 }
 
@@ -375,6 +390,9 @@ function buildSummaryRows(e) {
   ];
   AGES.forEach(a => { const n = e.filter(x => x.age === a).length; rows.push(['年代', a, n, pct(n)]); });
   REGIONS.forEach(r => { const n = e.filter(x => x.region === r).length; rows.push(['地域', r, n, pct(n)]); });
+  ABCS.forEach(k => { const n = e.filter(x => x.abc === k).length; rows.push(['ABC', k, n, pct(n)]); });
+  const noAbc = e.filter(x => !x.abc).length;
+  if (noAbc) rows.push(['ABC', '未選択', noAbc, pct(noAbc)]);
   return rows;
 }
 
@@ -472,7 +490,7 @@ function sheetXml(rows) {
   }).join('');
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-    '<cols><col min="1" max="4" width="20" customWidth="1"/></cols>' +
+    '<cols><col min="1" max="5" width="20" customWidth="1"/></cols>' +
     `<sheetData>${body}</sheetData></worksheet>`;
 }
 
@@ -520,8 +538,8 @@ function buildXlsx(dataRows, summaryRows) {
 async function publishXLSX() {
   const e = savedEntries();
   if (!e.length) return;
-  const dataRows = [['No.', '性別', '年代', '国・地域']]
-    .concat(e.map((x, i) => [i + 1, x.gender === '男' ? '男性' : '女性', x.age, x.region]));
+  const dataRows = [['No.', '性別', '年代', '国・地域', 'ABC']]
+    .concat(e.map((x, i) => [i + 1, x.gender === '男' ? '男性' : '女性', x.age, x.region, x.abc || '']));
   const blob = buildXlsx(dataRows, buildSummaryRows(e));
   const name = 'tabisaki-' + new Date().toISOString().slice(0, 10) + '.xlsx';
   const r = await deliverFile(blob, name, blob.type);
@@ -536,8 +554,8 @@ function publishPDF() {
   const sum = buildSummaryRows(e);
   const sumHtml = '<table class="sum"><thead><tr>' + sum[0].map(h => `<th>${xmlEsc(h)}</th>`).join('') + '</tr></thead><tbody>' +
     sum.slice(1).map(r => '<tr>' + r.map(v => `<td>${xmlEsc(v)}</td>`).join('') + '</tr>').join('') + '</tbody></table>';
-  const listHtml = '<table><thead><tr><th>No.</th><th>性別</th><th>年代</th><th>国・地域</th></tr></thead><tbody>' +
-    e.map((x, i) => `<tr><td>${i + 1}</td><td>${x.gender === '男' ? '男性' : '女性'}</td><td>${xmlEsc(x.age)}</td><td>${xmlEsc(x.region)}</td></tr>`).join('') +
+  const listHtml = '<table><thead><tr><th>No.</th><th>性別</th><th>年代</th><th>国・地域</th><th>ABC</th></tr></thead><tbody>' +
+    e.map((x, i) => `<tr><td>${i + 1}</td><td>${x.gender === '男' ? '男性' : '女性'}</td><td>${xmlEsc(x.age)}</td><td>${xmlEsc(x.region)}</td><td>${xmlEsc(x.abc || '')}</td></tr>`).join('') +
     '</tbody></table>';
   document.getElementById('print-root').innerHTML =
     `<h1>旅先クイズ会 参加者記録</h1><div class="pr-meta">出力日：${today}　保存済み：${e.length}名</div>` +
