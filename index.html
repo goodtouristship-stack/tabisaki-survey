@@ -138,7 +138,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;ba
       <div class="sc wide"><div class="sl">合計参加者（保存済）</div><div class="sv" id="s-total">0</div></div>
       <div class="sc"><div class="sl">男性</div><div class="sv" id="s-male">0</div></div>
       <div class="sc"><div class="sl">女性</div><div class="sv" id="s-female">0</div></div>
-      <div class="sc"><div class="sl">日本国内</div><div class="sv" id="s-dom">0</div></div>
+      <div class="sc"><div class="sl">国内</div><div class="sv" id="s-dom">0</div></div>
       <div class="sc"><div class="sl">海外</div><div class="sv" id="s-ovs">0</div></div>
     </div>
     <div class="bc"><div class="bt">年代別</div><div id="age-bars"></div></div>
@@ -173,8 +173,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;ba
 const TOTAL = 600;
 const AGES = ['10代','20代','30代','40代','50代','60代','70代以上'];
 const ABCS = ['A','B','C'];
-const REGIONS = ['日本国内','アジア・オセアニア','欧州','北米','中南米','中東・アフリカ'];
-const REG_SHORT = {'日本国内':'国内','アジア・オセアニア':'アジア','欧州':'欧州','北米':'北米','中南米':'中南米','中東・アフリカ':'中東AF'};
+const REGIONS = ['国内','北米','南米','アジア','オセアニア','アフリカ','欧州'];
+const REG_SHORT = {'国内':'国内','北米':'北米','南米':'南米','アジア':'アジア','オセアニア':'オセアニア','アフリカ':'アフリカ','欧州':'欧州'};
+// 旧区分で保存済みのデータを新しい区分に引き継ぐ
+const REGION_MIGRATE = {'日本国内':'国内','中南米':'南米','中東・アフリカ':'アフリカ','アジア・オセアニア':'アジア'};
 
 // Load or init 600 persons
 let persons = JSON.parse(localStorage.getItem('tqk5_persons') || 'null');
@@ -185,6 +187,9 @@ if (!persons || persons.length !== TOTAL) {
   });
   save();
 }
+
+persons.forEach(p => { if (p.region && REGION_MIGRATE[p.region]) p.region = REGION_MIGRATE[p.region]; });
+save();
 
 function showTab(id) {
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['record','stats','publish'][i] === id));
@@ -353,8 +358,8 @@ function renderStats() {
   document.getElementById('s-total').textContent = total;
   document.getElementById('s-male').textContent = e.filter(x => x.gender === '男').length;
   document.getElementById('s-female').textContent = e.filter(x => x.gender === '女').length;
-  document.getElementById('s-dom').textContent = e.filter(x => x.region === '日本国内').length;
-  document.getElementById('s-ovs').textContent = e.filter(x => x.region !== '日本国内').length;
+  document.getElementById('s-dom').textContent = e.filter(x => x.region === '国内').length;
+  document.getElementById('s-ovs').textContent = e.filter(x => x.region !== '国内').length;
   document.getElementById('age-bars').innerHTML = total
     ? AGES.map(a => { const n = e.filter(x => x.age === a).length, p = Math.round(n/total*100); return n ? `<div class="br"><div class="brl"><span>${a}</span><span>${n}名(${p}%)</span></div><div class="brt"><div class="brf" style="width:${p}%"></div></div></div>` : ''; }).join('')
     : '<div style="color:var(--g500);font-size:13px">データなし</div>';
@@ -379,13 +384,13 @@ function buildSummaryRows(e) {
   const pct = n => total ? Math.round(n / total * 100) + '%' : '';
   const male = e.filter(x => x.gender === '男').length;
   const female = e.filter(x => x.gender === '女').length;
-  const dom = e.filter(x => x.region === '日本国内').length;
+  const dom = e.filter(x => x.region === '国内').length;
   const rows = [
     ['項目', '内訳', '人数', '割合'],
     ['合計', '全参加者', total, '100%'],
     ['性別', '男性', male, pct(male)],
     ['性別', '女性', female, pct(female)],
-    ['国内・海外', '日本国内', dom, pct(dom)],
+    ['国内・海外', '国内', dom, pct(dom)],
     ['国内・海外', '海外', total - dom, pct(total - dom)]
   ];
   AGES.forEach(a => { const n = e.filter(x => x.age === a).length; rows.push(['年代', a, n, pct(n)]); });

@@ -1,6 +1,6 @@
 // 旅先クイズ会 — オフライン起動用 Service Worker
 // 通信できるときは最新版を取りに行き、取れないとき（圏外・電波が弱い）は保存済みの版を使う
-const CACHE = 'tqk-v7';
+const CACHE = 'tqk-v8';
 const ASSETS = ['./', './index.html', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', e => {
